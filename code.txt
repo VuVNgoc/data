@@ -1,24 +1,79 @@
-# Mapper function
-def mapper(line):
-    parts = line.split()
-    year = parts[0]
-    values = list(map(int, parts[1:]))
-    avg_value = sum(values) / len(values)
-    return year, avg_value
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
 
-# Reducer function
-def reducer(mapped_data):
-    for year, avg_value in mapped_data:
-        if avg_value > 30:
-            print(f"{year}: {avg_value:.2f}")
+public class SalesMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+    private final static IntWritable one = new IntWritable(1);
+    private Text country = new Text();
 
-# Main function to process data
-def main(file_path):
-    with open(file_path, 'r') as f:
-        data = f.readlines()
+    @Override
+    protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
+        String line = value.toString();
+        String[] fields = line.split(","); // Tách dòng dựa trên dấu phẩy
+        if (fields.length > 7) { // Đảm bảo dữ liệu có đủ trường
+            country.set(fields[7]); // Trường quốc gia ở vị trí thứ 7
+            context.write(country, one); // Gửi cặp (quốc gia, 1)
+        }
+    }
+}
 
-    mapped_data = [mapper(line) for line in data]
-    reducer(mapped_data)
 
-# Run the program
-main('sample.txt')
+import java.io.IOException;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+public class SalesReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+    @Override
+    protected void reduce(Text key, Iterable<IntWritable> values, Context context)
+            throws IOException, InterruptedException {
+        int sum = 0;
+        for (IntWritable value : values) {
+            sum += value.get(); // Tính tổng các giá trị
+        }
+        context.write(key, new IntWritable(sum)); // Gửi ra (quốc gia, tổng số lượng)
+    }
+}
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
+
+public class SalesDriver {
+    public static void main(String[] args) throws Exception {
+        Configuration conf = new Configuration();
+        Job job = Job.getInstance(conf, "Sales Count by Country");
+        job.setJarByClass(SalesDriver.class);
+
+        // Thiết lập Mapper và Reducer
+        job.setMapperClass(SalesMapper.class);
+        job.setReducerClass(SalesReducer.class);
+
+        // Định dạng đầu ra của Mapper
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(IntWritable.class);
+
+        // Định dạng đầu ra của Reducer
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(IntWritable.class);
+
+        // Định dạng dữ liệu đầu vào và đầu ra
+        job.setInputFormatClass(TextInputFormat.class);
+        job.setOutputFormatClass(TextOutputFormat.class);
+
+        // Đường dẫn tệp đầu vào và đầu ra
+        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+        // Chạy job và chờ kết thúc
+        System.exit(job.waitForCompletion(true) ? 0 : 1);
+    }
+}
