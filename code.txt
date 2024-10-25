@@ -1,39 +1,43 @@
-import java.io.IOException;
 import org.apache.hadoop.io.IntWritable;
-import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Mapper;
 
-public class SalesMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+import java.io.IOException;
+
+public class SalesMapper extends Mapper<Object, Text, Text, IntWritable> {
     private final static IntWritable one = new IntWritable(1);
     private Text country = new Text();
 
-    @Override
-    protected void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-        String line = value.toString();
-        String[] fields = line.split(","); // Tách dòng dựa trên dấu phẩy
-        if (fields.length > 7) { // Đảm bảo dữ liệu có đủ trường
-            country.set(fields[7]); // Trường quốc gia ở vị trí thứ 7
-            context.write(country, one); // Gửi cặp (quốc gia, 1)
+    public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+        // Tách dữ liệu theo dấu phẩy
+        String[] fields = value.toString().split(",");
+        
+        // Kiểm tra nếu dữ liệu đủ trường
+        if (fields.length > 7) {
+            String countryName = fields[7];  // Trường thứ 7 là quốc gia
+            country.set(countryName);  // Sử dụng quốc gia làm key
+            context.write(country, one);  // Xuất cặp key-value với key là quốc gia và value là 1
         }
     }
 }
 
 
-import java.io.IOException;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Reducer;
 
+import java.io.IOException;
+
 public class SalesReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
-    @Override
-    protected void reduce(Text key, Iterable<IntWritable> values, Context context)
-            throws IOException, InterruptedException {
+    private IntWritable result = new IntWritable();
+
+    public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
         int sum = 0;
-        for (IntWritable value : values) {
-            sum += value.get(); // Tính tổng các giá trị
+        for (IntWritable val : values) {
+            sum += val.get();  // Tính tổng số giao dịch cho mỗi quốc gia
         }
-        context.write(key, new IntWritable(sum)); // Gửi ra (quốc gia, tổng số lượng)
+        result.set(sum);
+        context.write(key, result);  // Xuất kết quả với key là quốc gia và value là tổng số giao dịch
     }
 }
 
@@ -44,36 +48,101 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
-import org.apache.hadoop.mapreduce.lib.input.TextInputFormat;
-import org.apache.hadoop.mapreduce.lib.output.TextOutputFormat;
 
 public class SalesDriver {
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
-        Job job = Job.getInstance(conf, "Sales Count by Country");
-        job.setJarByClass(SalesDriver.class);
+        Job job = Job.getInstance(conf, "sales count by country");
 
-        // Thiết lập Mapper và Reducer
+        job.setJarByClass(SalesDriver.class);
         job.setMapperClass(SalesMapper.class);
+        job.setCombinerClass(SalesReducer.class);  // Sử dụng Reducer làm combiner
         job.setReducerClass(SalesReducer.class);
 
-        // Định dạng đầu ra của Mapper
-        job.setMapOutputKeyClass(Text.class);
-        job.setMapOutputValueClass(IntWritable.class);
-
-        // Định dạng đầu ra của Reducer
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
 
-        // Định dạng dữ liệu đầu vào và đầu ra
-        job.setInputFormatClass(TextInputFormat.class);
-        job.setOutputFormatClass(TextOutputFormat.class);
+        FileInputFormat.addInputPath(job, new Path(args[0]));  // Đường dẫn input
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));  // Đường dẫn output
 
-        // Đường dẫn tệp đầu vào và đầu ra
-        FileInputFormat.addInputPath(job, new Path(args[0]));
-        FileOutputFormat.setOutputPath(job, new Path(args[1]));
-
-        // Chạy job và chờ kết thúc
         System.exit(job.waitForCompletion(true) ? 0 : 1);
     }
 }
+
+1. Biên dịch chương trình:
+
+Biên dịch mã nguồn trên và tạo file JAR.
+2. Chạy chương trình Hadoop:
+hadoop jar SalesCount.jar SalesDriver <đường dẫn input trên HDFS> <đường dẫn output trên HDFS>
+3. Kiểm tra kết quả:
+Sau khi chạy chương trình, bạn có thể kiểm tra kết quả trong thư mục output bằng lệnh sau:
+hadoop fs -cat <output_directory>/part-r-00000
+
+
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Mapper;
+import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+import java.io.IOException;
+
+public class SalesCount {
+
+    // Mapper Class
+    public static class SalesMapper extends Mapper<Object, Text, Text, IntWritable> {
+        private final static IntWritable one = new IntWritable(1);
+        private Text country = new Text();
+
+        public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
+            // Tách dữ liệu theo dấu phẩy
+            String[] fields = value.toString().split(",");
+
+            // Kiểm tra nếu dữ liệu đủ trường
+            if (fields.length > 7) {
+                String countryName = fields[7];  // Trường thứ 7 là quốc gia
+                country.set(countryName);  // Tạo key là quốc gia
+                context.write(country, one);  // Xuất cặp key-value với key là quốc gia và value là 1
+            }
+        }
+    }
+
+    // Reducer Class
+    public static class SalesReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+        private IntWritable result = new IntWritable();
+
+        public void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+            int sum = 0;
+            for (IntWritable val : values) {
+                sum += val.get();  // Tính tổng số giao dịch cho mỗi quốc gia
+            }
+            result.set(sum);
+            context.write(key, result);  // Xuất kết quả với key là quốc gia và value là tổng số giao dịch
+        }
+    }
+
+    // Driver Class
+    public static void main(String[] args) throws Exception {
+        Configuration conf = new Configuration();
+        Job job = Job.getInstance(conf, "sales count by country");
+
+        job.setJarByClass(SalesCount.class);
+        job.setMapperClass(SalesMapper.class);
+        job.setCombinerClass(SalesReducer.class);  // Sử dụng Reducer làm combiner
+        job.setReducerClass(SalesReducer.class);
+
+        job.setOutputKeyClass(Text.class);
+        job.setOutputValueClass(IntWritable.class);
+
+        FileInputFormat.addInputPath(job, new Path(args[0]));  // Đường dẫn input
+        FileOutputFormat.setOutputPath(job, new Path(args[1]));  // Đường dẫn output
+
+        System.exit(job.waitForCompletion(true) ? 0 : 1);
+    }
+}
+
